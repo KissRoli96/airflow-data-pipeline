@@ -28,6 +28,7 @@ services:
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
+      - ./data:/opt/airflow/data
     entrypoint: /bin/bash -c "airflow db init && airflow webserver & airflow scheduler"
   
 volumes:
