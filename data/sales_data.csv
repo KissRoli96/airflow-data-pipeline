@@ -1,0 +1,4 @@
+id,date,sales_amount,currency
+1,2024-02-01,1500,USD
+2,2024-02-02,2300,USD
+3,2024-02-03,1750,EUR
