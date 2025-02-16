@@ -50,20 +50,21 @@ def load_to_postgres():
         conn = psycopg2.connect(**DB_SETTINGS)
         cur = conn.cursor()
 
-        # Create table if not exists
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS sales (
-                id SERIAL PRIMARY KEY,
-                date DATE,
-                amount NUMERIC,
-                currency TEXT
-            )
-        """)
+        # Clear old data before inserting
+        cur.execute("DELETE FROM sales;")
 
         # Insert data
         for _, row in df.iterrows():
-            cur.execute("INSERT INTO sales (date, amount, currency) VALUES (%s, %s, %s)",
-                        (row['date'], row['amount'], row['currency']))
+            cur.execute(
+            """
+            INSERT INTO sales (date, amount, currency) 
+            VALUES (%s, %s, %s)
+            ON CONFLICT (date, amount, currency) DO NOTHING;
+            """,
+            (row["date"], row["amount"], row["currency"]),
+        )
+
+
 
         conn.commit()
         cur.close()
