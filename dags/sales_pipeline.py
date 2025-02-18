@@ -87,7 +87,8 @@ default_args = {
 dag = DAG(
     'sales_pipeline',
     default_args=default_args,
-    schedule_interval='@daily',
+    schedule_interval="0 6 * * *", # RUNS every day at 06:00 UTC
+    catchup=False
 )
 
 # Define tasks
