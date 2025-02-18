@@ -5,6 +5,8 @@ import psycopg2
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from datetime import datetime, timedelta
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col
 
 # PostgreSQL connection settings
 DB_SETTINGS = {
@@ -19,27 +21,55 @@ DATA_DIR = "/opt/airflow/data"
 # Ensure directory exists
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# Task 1: Read and process CSV file
+# Task 1: Read and process CSV file using Apache Spark
 def process_csv():
     try:
-        logging.info("Reading CSV file...")
-        df = pd.read_csv(f"{DATA_DIR}/sales_data.csv")
+        logging.info("Initializing Spark Session...")
+        
+        # Initialize a Spark session
+        spark = SparkSession.builder.appName("SalesProcessing").getOrCreate()
 
-        # Data transformation
-        df['date'] = pd.to_datetime(df['date'], errors='coerce')  # Convert date format
-        df.rename(columns={'sales_amount': 'amount'}, inplace=True)  # Rename column
+        logging.info("Reading CSV file using Apache Spark...")
 
-        # Check if required columns exist
-        if not all(col in df.columns for col in ['id', 'date', 'amount', 'currency']):
-            raise ValueError("Missing required columns in CSV file")
+        # Read the CSV file into a Spark DataFrame
+        df = spark.read.option("header", True).option("inferSchema", True).csv(f"{DATA_DIR}/sales_data.csv")
 
-        # Save transformed data
-        df.to_csv(f"{DATA_DIR}/sales_data_transformed.csv", index=False)
-        logging.info("CSV processing completed successfully!")
+        logging.info("Processing data...")
+
+        # Rename column "sales_amount" to "amount"
+        df = df.withColumnRenamed("sales_amount", "amount")
+
+        # Convert all column names to lowercase
+        df = df.select([col(column).alias(column.lower()) for column in df.columns])
+
+        # Drop any rows with NULL values
+        df = df.dropna()
+
+        logging.info("Data processing completed. Saving transformed CSV...")
+
+        # Save the transformed data back as a CSV file (single file)
+        output_path = f"{DATA_DIR}/sales_data_transformed.csv"
+        df.coalesce(1).write.mode("overwrite").option("header", True).csv(f"{DATA_DIR}/sales_data_transformed_tmp")
+
+        # Rename the Spark output file to ensure Pandas can read it
+        spark_output_dir = f"{DATA_DIR}/sales_data_transformed_tmp"
+        files = os.listdir(spark_output_dir)
+        for file in files:
+            if file.endswith(".csv"):
+                os.rename(f"{spark_output_dir}/{file}", output_path)
+                break
+
+        # Remove the temporary Spark folder
+        os.rmdir(spark_output_dir)
+
+        logging.info("File saved successfully!")
+
+        # Stop Spark session
+        spark.stop()
 
     except Exception as e:
-        logging.error(f"Error processing CSV: {str(e)}")
-        raise  # Rethrow exception to Airflow
+        logging.error(f"Error processing CSV with Spark: {str(e)}")
+        raise
 
 # Task 2: Load transformed data into PostgreSQL
 def load_to_postgres():
@@ -56,15 +86,13 @@ def load_to_postgres():
         # Insert data
         for _, row in df.iterrows():
             cur.execute(
-            """
-            INSERT INTO sales (date, amount, currency) 
-            VALUES (%s, %s, %s)
-            ON CONFLICT (date, amount, currency) DO NOTHING;
-            """,
-            (row["date"], row["amount"], row["currency"]),
-        )
-
-
+                """
+                INSERT INTO sales (date, amount, currency) 
+                VALUES (%s, %s, %s)
+                ON CONFLICT (date, amount, currency) DO NOTHING;
+                """,
+                (row["date"], row["amount"], row["currency"]),
+            )
 
         conn.commit()
         cur.close()
@@ -73,33 +101,33 @@ def load_to_postgres():
 
     except Exception as e:
         logging.error(f"Error loading data to PostgreSQL: {str(e)}")
-        raise  # Rethrow exception to Airflow
+        raise
 
 # Airflow DAG Definition
 default_args = {
-    'owner': 'airflow',
-    'depends_on_past': False,
-    'start_date': datetime(2024, 2, 1),
-    'retries': 1,
-    'retry_delay': timedelta(minutes=5),
+    "owner": "airflow",
+    "depends_on_past": False,
+    "start_date": datetime(2024, 2, 1),
+    "retries": 1,
+    "retry_delay": timedelta(minutes=5),
 }
 
 dag = DAG(
-    'sales_pipeline',
+    "sales_pipeline",
     default_args=default_args,
-    schedule_interval="0 6 * * *", # RUNS every day at 06:00 UTC
-    catchup=False
+    schedule_interval="0 6 * * *",  # Runs every day at 06:00 UTC
+    catchup=False,
 )
 
 # Define tasks
 task_1 = PythonOperator(
-    task_id='process_csv',
+    task_id="process_spark_csv", 
     python_callable=process_csv,
     dag=dag,
 )
 
 task_2 = PythonOperator(
-    task_id='load_to_postgres',
+    task_id="load_to_postgres",
     python_callable=load_to_postgres,
     dag=dag,
 )
