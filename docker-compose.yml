@@ -18,6 +18,8 @@ services:
     image: apache/airflow:latest
     container_name: airflow
     restart: always
+    dns:
+     - 8.8.8.8
     depends_on:
       - postgres
     environment:
