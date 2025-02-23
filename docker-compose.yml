@@ -15,11 +15,13 @@ services:
       - postgres_data:/var/lib/postgresql/data
 
   airflow:
+    build: .
     image: apache/airflow:latest
     container_name: airflow
     restart: always
     dns:
      - 8.8.8.8
+     - 1.1.1.1  # Cloudflare DNS (Backup)
     depends_on:
       - postgres
     environment:
@@ -32,6 +34,5 @@ services:
       - ./logs:/opt/airflow/logs
       - ./data:/opt/airflow/data
     entrypoint: /bin/bash -c "airflow db init && airflow webserver & airflow scheduler"
-  
 volumes:
   postgres_data:
